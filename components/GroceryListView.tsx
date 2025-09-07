@@ -1,5 +1,5 @@
 // components/GroceryListView.tsx
-import { Item } from '@/types/types';
+import { AggregatedItem, Item } from '@/types/types';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useState } from 'react';
@@ -16,103 +16,51 @@ import uuid from 'react-native-uuid';
 import QuantityEditorModal, { parseQuantityAndText } from './QuantityEditorModal';
 
 interface GroceryListViewProps {
-  items: Item[];
-  setItems: React.Dispatch<React.SetStateAction<Item[]>>;
+  items: AggregatedItem[];
   editingId: string;
   setEditingId: React.Dispatch<React.SetStateAction<string>>;
   inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
   isKeyboardVisible: boolean;
   markDirty: () => void;
+  onUpdateQuantity: (itemName: string, quantity: number, unit: string) => void;
+  onDeleteItem: (itemsToDelete: Item[]) => void;
+  onUpdateItemText: (aggItem: AggregatedItem, newText: string) => void;
+  onToggleCheck: (itemIds: string[], newCheckedState: boolean) => void;
+  onReRankItems: (newOrderedItems: Item[]) => void;
 }
 
 export default function GroceryListView({
   items,
-  setItems,
   editingId,
   setEditingId,
   inputRefs,
   isKeyboardVisible,
   markDirty,
+  onUpdateQuantity,
+  onDeleteItem,
+  onUpdateItemText,
+  onToggleCheck,
+  onReRankItems,
 }: GroceryListViewProps) {
 
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [selectedItem, setSelectedItem] = useState<AggregatedItem | null>(null);
+  const [editingText, setEditingText] = useState<string>('');
 
-  
   const assignRef = useCallback((id: string) => (ref: TextInput | null) => {
     inputRefs.current[id] = ref;
   }, [inputRefs]);
 
-  const updateItemText = (id: string, text: string) => {
-    setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item)));
-    markDirty();
-  };
-
   const toggleCheck = (id: string) => {
-    setItems(prev => prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item)));
-    markDirty();
+    const itemToToggle = items.find(item => item.id === id);
+    if (!itemToToggle) return;
+
+    const newCheckedState = !itemToToggle.checked;
+    const underlyingItemIds = itemToToggle.items.map(i => i.id);
+    onToggleCheck(underlyingItemIds, newCheckedState);
   };
 
-  const addItemAfter = (id: string) => {
-    const index = items.findIndex(i => i.id === id);
-    if (index === -1) return;
-    
-    const current = LexoRank.parse(items[index].listOrder);
-    const next = items[index + 1] ? LexoRank.parse(items[index + 1].listOrder) : current.genNext();
-    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: current.between(next).toString(), isSection: false };
-    
-    const updated = [...items];
-    updated.splice(index + 1, 0, newItem);
-    setItems(updated);
-    setEditingId(newItem.id);
-    markDirty();
-    setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
-  };
-  
-  const deleteItem = (id: string) => {
-    const index = items.findIndex(i => i.id === id);
-    if (index === -1) return;
-
-    if (items.length === 1) {
-      const placeholderItem = {
-        id: uuid.v4() as string,
-        text: '',
-        checked: false,
-        listOrder: LexoRank.middle().toString(),
-        isSection: false,
-      };
-      setItems([placeholderItem]);
-      setEditingId(placeholderItem.id);
-      markDirty();
-      return;
-    }
-
-    delete inputRefs.current[id];
-    const updated = items.filter(item => item.id !== id);
-    setItems(updated);
-    markDirty();
-
-    if (isKeyboardVisible) {
-      const nextFocusId = updated[Math.max(0, index - 1)]?.id;
-      if (nextFocusId) {
-        setEditingId(nextFocusId);
-      }
-    } else {
-      setEditingId('');
-    }
-  };
-
-  const reRankItems = (data: Item[]) => {
-      let rank = LexoRank.middle();
-      const newItems = data.map(item => {
-          rank = rank.genNext();
-          return { ...item, listOrder: rank.toString() };
-      });
-      setItems(newItems);
-      markDirty();
-  };
-  
-  const openQuantityEditor = (item: Item) => {
+  const openQuantityEditor = (item: AggregatedItem) => {
     setSelectedItem(item);
     setIsModalVisible(true);
   };
@@ -122,47 +70,77 @@ export default function GroceryListView({
     setSelectedItem(null);
   };
 
-  const handleSaveQuantity = (newQuantity: string) => {
+  const handleSaveQuantity = (newQuantity: number, newUnit: string) => {
     if (!selectedItem) return;
-    if(selectedItem.quantity === newQuantity) {
-      closeQuantityEditor();
-      return;
-    }
-
-    setItems(prev =>
-      prev.map(i =>
-        i.id === selectedItem.id
-          // If the input is empty, set quantity to null, otherwise save the trimmed value
-          ? { ...i, quantity: newQuantity.trim() || undefined }
-          : i
-      )
-    );
-    markDirty();
+    onUpdateQuantity(selectedItem.name, newQuantity, newUnit);
     closeQuantityEditor();
   };
 
-  const handleItemBlur = (item: Item) => {
-    // We only parse if there's no quantity already, or if the text has changed.
-    const { quantity, text: newText } = parseQuantityAndText(item.text);
-    
-    // Only update if the parsing resulted in a change
-    if (quantity || newText !== item.text) {
-        setItems(prev =>
-            prev.map(i =>
-                i.id === item.id
-                    ? { ...i, text: newText, quantity: quantity || i.quantity }
-                    : i
-            )
-        );
-        markDirty();
-    }
-    
-    // Clear editing state when the user taps away
-    setEditingId('');
+  const deleteItem = (id: string) => {
+    const itemToDelete = items.find(item => item.id === id);
+    if (!itemToDelete) return;
+    onDeleteItem(itemToDelete.items);
   };
 
+  const updateItemText = (id: string, newText: string) => {
+    const itemToUpdate = items.find(item => item.id === id);
+    if (!itemToUpdate) return;
+    onUpdateItemText(itemToUpdate, newText);
+  };
 
-  const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<Item>) => {
+  const reRankItems = (data: AggregatedItem[]) => {
+    const flattenedItems = data.flatMap(aggItem => aggItem.items);
+
+    let rank = LexoRank.middle();
+    const newOrderedItems = flattenedItems.map(item => {
+      const newItem = { ...item, listOrder: rank.toString() };
+      rank = rank.genNext();
+      return newItem;
+    });
+    
+    onReRankItems(newOrderedItems);
+  };
+
+  const addItemAfter = (id: string) => {
+    const aggIndex = items.findIndex(i => i.id === id);
+    if (aggIndex === -1) return;
+
+    const currentAggItem = items[aggIndex];
+    const lastUnderlyingItem = currentAggItem.items[currentAggItem.items.length - 1];
+    const currentRank = LexoRank.parse(lastUnderlyingItem.listOrder);
+
+    let nextRank;
+    const nextAggItem = items[aggIndex + 1];
+    if (nextAggItem && nextAggItem.items.length > 0) {
+      nextRank = LexoRank.parse(nextAggItem.items[0].listOrder);
+    } else {
+      nextRank = currentRank.genNext();
+    }
+
+    const newRank = currentRank.between(nextRank);
+    const newItem: Item = {
+      id: uuid.v4() as string,
+      text: '',
+      checked: false,
+      listOrder: newRank.toString(),
+      isSection: false,
+      isManuallyAdded: true,
+    };
+
+    setItems(prevItems => {
+      const insertionIndex = prevItems.findIndex(i => i.id === lastUnderlyingItem.id);
+      if (insertionIndex === -1) return prevItems; // Should not happen
+      const updatedItems = [...prevItems];
+      updatedItems.splice(insertionIndex + 1, 0, newItem);
+      return updatedItems;
+    });
+
+    setEditingId(newItem.id);
+    markDirty();
+    setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
+  };
+
+  const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<AggregatedItem>) => {
     const isEditing = item.id === editingId;
     return (
       <View style={styles.itemRow}>
@@ -177,36 +155,43 @@ export default function GroceryListView({
         >
           <Text style={styles.dragIcon}>≡</Text>
         </Pressable>
-        {!item.isSection && (
-          <TouchableOpacity style={styles.checkbox} onPress={() => toggleCheck(item.id)}>
-            {item.checked ? <Text>✓</Text> : null}
-          </TouchableOpacity>
-        )}
-        { item.quantity && (
-          <TouchableOpacity onPress={() => openQuantityEditor(item)}>
-            <View style={[styles.quantityLabel, item.checked && styles.quantityChecked]}>
-              <Text style={[item.checked && styles.quantityTextChecked]}>{item.quantity}</Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={styles.checkbox} onPress={() => toggleCheck(item.id)}>
+          {item.checked ? <Text>✓</Text> : null}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => openQuantityEditor(item)}>
+          <View style={[styles.quantityLabel, item.checked && styles.quantityChecked]}>
+            <Text style={[item.checked && styles.quantityTextChecked]}>{`${item.quantity} ${item.unit}`}</Text>
+          </View>
+        </TouchableOpacity>
         <TextInput
             ref={assignRef(item.id)}
-            value={item.text}
-            style={[styles.editInput, item.checked && styles.checked, item.isSection && styles.sectionText]}
-            onChangeText={text => updateItemText(item.id, text)}
-            onFocus={() => setEditingId(item.id)}
+            value={isEditing ? editingText : item.name}
+            style={[styles.editInput, item.checked && styles.checked]}
+            onChangeText={text => {
+                setEditingText(text);
+                updateItemText(item.id, text);
+            }}
+            onFocus={() => {
+                setEditingId(item.id);
+                setEditingText(item.name);
+            }}
             onKeyPress={({ nativeEvent }) => {
-              if (nativeEvent.key === 'Backspace' && item.text === '') {
+              if (nativeEvent.key === 'Backspace' && editingText === '') {
                 deleteItem(item.id);
               }
             }}
             onSubmitEditing={() => addItemAfter(item.id)}
-            onBlur={() => handleItemBlur(item)}
+            onBlur={() => {
+                setEditingId('');
+            }}
             blurOnSubmit={false}
             returnKeyType="done"
         />
         {isEditing ? (
-          <TouchableOpacity onPress={() => deleteItem(item.id)} style={styles.clearButton}>
+          <TouchableOpacity
+            onPress={() => deleteItem(item.id)}
+            style={styles.clearButton}
+          >
             <Text style={styles.clearText}>✕</Text>
           </TouchableOpacity>
         ) : (
@@ -218,6 +203,7 @@ export default function GroceryListView({
     );
   }, [editingId, items, assignRef]);
 
+
   return (
     <>
       <DraggableFlatList
@@ -225,6 +211,7 @@ export default function GroceryListView({
         onDragEnd={({ data }) => reRankItems(data)}
         keyExtractor={item => item.id}
         renderItem={renderItem}
+        dragItemOverflow={true}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         initialNumToRender={15}

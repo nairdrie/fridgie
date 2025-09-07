@@ -6,7 +6,8 @@ import MealPlanView from '@/components/MealPlanView';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useLists } from '@/context/ListContext';
-import { Item, List, ListView, Meal, Recipe } from '@/types/types';
+import { AggregatedItem, Item, List, ListView, Meal, Recipe } from '@/types/types';
+import { normalizeName, parseQuantity } from '@/utils/quantity';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -39,7 +40,121 @@ export default function HomeScreen() {
     const [meals, setMeals] = useState<Meal[]>([]);
     const [items, setItems] = useState<Item[]>([]);
 
+    const aggregatedItems = React.useMemo((): AggregatedItem[] => {
+        const itemMap: { [key: string]: AggregatedItem } = {};
+
+        const filteredItems = items.filter(item => !selectedList?.mutations?.[item.id]?.ignored);
+
+        filteredItems.forEach(item => {
+            if (item.isSection) return;
+
+            const normalizedName = normalizeName(item.text);
+            const { quantity, unit } = parseQuantity(item.quantity);
+
+            if (itemMap[normalizedName]) {
+                // If item exists, update quantity and push the original item
+                itemMap[normalizedName].quantity += quantity;
+                itemMap[normalizedName].items.push(item);
+            } else {
+                // If item doesn't exist, create a new entry
+                itemMap[normalizedName] = {
+                    id: uuid.v4() as string,
+                    name: item.text,
+                    quantity: quantity,
+                    unit: unit,
+                    items: [item],
+                    checked: item.checked, // This will be updated below
+                };
+            }
+        });
+
+        // Apply user-defined quantities
+        if (selectedList?.userDefinedQuantities) {
+            Object.entries(selectedList.userDefinedQuantities).forEach(([name, userQuantity]) => {
+                const normalizedName = normalizeName(name);
+                if (itemMap[normalizedName]) {
+                    itemMap[normalizedName].quantity = userQuantity.quantity;
+                    itemMap[normalizedName].unit = userQuantity.unit;
+                }
+            });
+        }
+
+        const aggregatedList = Object.values(itemMap);
+
+        // Determine the checked state of the aggregated item
+        aggregatedList.forEach(aggItem => {
+            aggItem.checked = aggItem.items.every(item => item.checked);
+        });
+
+        return aggregatedList;
+    }, [items, selectedList?.userDefinedQuantities]);
+
     const [editingId, setEditingId] = useState<string>('');
+    const handleToggleCheck = (itemIds: string[], newCheckedState: boolean) => {
+        setItems(prevItems =>
+            prevItems.map(item =>
+                itemIds.includes(item.id) ? { ...item, checked: newCheckedState } : item
+            )
+        );
+        markDirty();
+    };
+
+    const handleReRankItems = (newOrderedItems: Item[]) => {
+        setItems(newOrderedItems);
+        markDirty();
+    };
+
+    const handleUpdateItemText = (aggItem: AggregatedItem, newText: string) => {
+        if (!selectedList) return;
+
+        const allManuallyAdded = aggItem.items.every(i => i.isManuallyAdded);
+
+        if (allManuallyAdded) {
+            const underlyingIds = new Set(aggItem.items.map(i => i.id));
+            const updatedItems = items.map(item =>
+                underlyingIds.has(item.id) ? { ...item, text: newText } : item
+            );
+            setItems(updatedItems);
+            markDirty();
+        } else {
+            const newMutations = { ...(selectedList.mutations || {}) };
+            aggItem.items.forEach(item => {
+                newMutations[item.id] = { ...newMutations[item.id], ignored: true };
+            });
+
+            const newItem: Item = {
+                id: uuid.v4() as string,
+                text: newText,
+                checked: false,
+                listOrder: aggItem.items[0].listOrder, // Use the rank of the first item to keep position
+                isSection: false,
+                isManuallyAdded: true,
+            };
+
+            setItems([...items, newItem]);
+            updateList(selectedGroup.id, selectedList.id, { mutations: newMutations }).catch(console.error);
+        }
+    };
+
+    const handleDeleteItem = (itemsToDelete: Item[]) => {
+        if (!selectedList) return;
+        const newMutations = { ...(selectedList.mutations || {}) };
+        itemsToDelete.forEach(item => {
+            newMutations[item.id] = { ...newMutations[item.id], ignored: true };
+        });
+        updateList(selectedGroup.id, selectedList.id, { mutations: newMutations }).catch(console.error);
+    };
+
+    const handleUpdateQuantity = (itemName: string, quantity: number, unit: string) => {
+        if (!selectedList) return;
+        const normalizedName = normalizeName(itemName);
+        const updatedQuantities = {
+            ...(selectedList.userDefinedQuantities || {}),
+            [normalizedName]: { quantity, unit },
+        };
+        // This will trigger a re-render and the new quantity will be used in the aggregation
+        updateList(selectedGroup.id, selectedList.id, { userDefinedQuantities: updatedQuantities }).catch(console.error);
+    };
     const [isCategorizing, setIsCategorizing] = useState(false);
     const [isKeyboardVisible, setKeyboardVisible] = useState(false);
     const inputRefs = useRef<Record<string, TextInput | null>>({});
@@ -147,10 +262,10 @@ export default function HomeScreen() {
     useEffect(() => {
         if (!selectedList?.id || !selectedGroup) return;
         const timeout = setTimeout(() => {
-            updateList(selectedGroup.id, selectedList.id, { items, meals: meals }).catch(console.error);
+            updateList(selectedGroup.id, selectedList.id, { items, meals: meals, userDefinedQuantities: selectedList.userDefinedQuantities }).catch(console.error);
         }, 500);
         return () => clearTimeout(timeout);
-    }, [items, meals, selectedList?.id, selectedGroup]);
+    }, [items, meals, selectedList]);
 
     const focusAtEnd = (id: string) => {
         const ref = inputRefs.current[id];
@@ -329,7 +444,14 @@ export default function HomeScreen() {
     const handleAddItem = (isSection = false) => {
         if (!selectedList) return;
         const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
-        const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: isSection };
+        const newItem: Item = {
+            id: uuid.v4() as string,
+            text: '',
+            checked: false,
+            listOrder: lastOrder.genNext().toString(),
+            isSection: isSection,
+            isManuallyAdded: true,
+        };
         const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
         setItems(newItems);
         setEditingId(newItem.id);
@@ -419,13 +541,17 @@ export default function HomeScreen() {
             >
                 { selectedView == ListView.GroceryList ? (
                     <GroceryListView
-                        items={items}
-                        setItems={setItems}
+                        items={aggregatedItems}
                         editingId={editingId}
                         setEditingId={setEditingId}
                         inputRefs={inputRefs}
                         isKeyboardVisible={isKeyboardVisible}
                         markDirty={markDirty}
+                        onUpdateQuantity={handleUpdateQuantity}
+                        onDeleteItem={handleDeleteItem}
+                        onUpdateItemText={handleUpdateItemText}
+                        onToggleCheck={handleToggleCheck}
+                        onReRankItems={handleReRankItems}
                     />
                 ) : (
                     <MealPlanView

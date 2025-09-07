@@ -1,12 +1,12 @@
-import { Item } from "@/types/types";
+import { AggregatedItem } from "@/types/types";
 import { primary } from "@/utils/styles";
 import { useEffect, useState } from "react";
 import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 interface QuantityEditorModalProps {
     isVisible: boolean;
-    item: Item | null;
-    onSave: (newQuantity: string) => void;
+    item: AggregatedItem | null;
+    onSave: (newQuantity: number, newUnit: string) => void;
     onClose: () => void;
 }
 
@@ -57,16 +57,21 @@ export const parseQuantityAndText = (text: string): { quantity: string | null; t
 
 export default function QuantityEditorModal({ isVisible, item, onSave, onClose }: QuantityEditorModalProps) {
     const [quantity, setQuantity] = useState('');
+    const [unit, setUnit] = useState('');
 
     useEffect(() => {
-        // Pre-fill the input with the current quantity when the modal opens
         if (item) {
-            setQuantity(item.quantity || '');
+            setQuantity(item.quantity.toString());
+            setUnit(item.unit);
         }
     }, [item]);
 
     const handleSave = () => {
-        onSave(quantity);
+        const newQuantity = parseFloat(quantity);
+        if (!isNaN(newQuantity)) {
+            onSave(newQuantity, unit);
+        }
+        onClose();
     };
 
     return (
@@ -79,15 +84,25 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
             <View style={styles.modalContainer}>
                 <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>Edit Quantity</Text>
-                    <Text style={styles.modalItemName}>{item?.text}</Text>
-                    <TextInput
-                        style={styles.modalInput}
-                        value={quantity}
-                        onChangeText={setQuantity}
-                        placeholder="e.g., 200g or 1 cup"
-                        autoFocus={true}
-                        onSubmitEditing={handleSave}
-                    />
+                    <Text style={styles.modalItemName}>{item?.name}</Text>
+                    <View style={styles.inputRow}>
+                        <TextInput
+                            style={[styles.modalInput, styles.quantityInput]}
+                            value={quantity}
+                            onChangeText={setQuantity}
+                            placeholder="e.g., 200"
+                            autoFocus={true}
+                            keyboardType="numeric"
+                            onSubmitEditing={handleSave}
+                        />
+                        <TextInput
+                            style={[styles.modalInput, styles.unitInput]}
+                            value={unit}
+                            onChangeText={setUnit}
+                            placeholder="e.g., g or cup"
+                            onSubmitEditing={handleSave}
+                        />
+                    </View>
                     <View style={styles.modalButtons}>
                         <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={onClose}>
                             <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -130,14 +145,25 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
     color: '#666',
     marginBottom: 16,
   },
-  modalInput: {
+  inputRow: {
+    flexDirection: 'row',
     width: '100%',
+    justifyContent: 'space-between',
+  },
+  modalInput: {
     borderWidth: 1,
     borderColor: '#ccc',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
     textAlign: 'center',
+  },
+  quantityInput: {
+    flex: 2,
+    marginRight: 10,
+  },
+  unitInput: {
+    flex: 1,
   },
   modalButtons: {
     flexDirection: 'row',

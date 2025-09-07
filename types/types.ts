@@ -7,14 +7,27 @@ export type Item = {
     isSection: boolean; 
     mealId?: string;
     quantity?: string;
+    isManuallyAdded?: boolean;
   };
   
 export type List = {
     id: string; // Firestore document ID
-    weekStart: string;
+    weekStart:string;
     hasContent?: boolean;
     items: Item[];
     meals: Meal[];
+    // New field to store user-defined quantities for aggregated items
+    userDefinedQuantities?: { [itemName: string]: { quantity: number; unit: string } };
+    mutations?: { [itemId: string]: { ignored?: boolean } };
+};
+
+export type AggregatedItem = {
+    id: string;
+    name: string;
+    quantity: number;
+    unit: string;
+    items: Item[]; // The original items that were aggregated
+    checked: boolean; // Represents the checked state of the aggregated item
 };
 
 // types/types.ts
