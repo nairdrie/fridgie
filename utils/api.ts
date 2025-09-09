@@ -211,11 +211,34 @@ export async function registerForPushNotificationsAsync() {
   return token;
 }
 
-export async function saveRecipe(recipe: Omit<Recipe, 'id'>): Promise<Recipe> {
-  const res = await authorizedFetch(`${BASE_URL}/recipe`, {
-    method: 'POST',
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { storage } from './firebase';
+
+export async function uploadImage(uri: string, path: string): Promise<string> {
+  if (!uri.startsWith('file://')) {
+    return uri;
+  }
+  const response = await fetch(uri);
+  const blob = await response.blob();
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, blob);
+  return await getDownloadURL(storageRef);
+}
+
+export async function saveRecipe(recipe: Recipe): Promise<Recipe> {
+  const { id, ...recipeData } = recipe;
+  const isUpdate = !!id;
+
+  // Use PUT for updates, POST for creates
+  const url = isUpdate ? `${BASE_URL}/recipe/${id}` : `${BASE_URL}/recipe`;
+  const method = isUpdate ? 'PUT' : 'POST';
+
+  const res = await authorizedFetch(url, {
+    method: method,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(recipe),
+    // For POST, send the whole data, for PUT, the backend might only need the changed fields,
+    // but sending the whole object is a common pattern for simplicity.
+    body: JSON.stringify(recipeData),
   });
   return res.json();
 }

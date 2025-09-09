@@ -4,6 +4,7 @@ import { Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { format } from 'date-fns';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -14,16 +15,13 @@ interface RecipeCardProps {
 }
 
 export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCardProps) {
-    const router = useRouter();
-
     const handlePress = () => {
         onView(recipe.id);
     };
 
-
     return (
         <TouchableOpacity style={styles.cardContainer} onPress={handlePress}>
-            { recipe.photoURL ? (
+            {recipe.photoURL ? (
                 <Image
                     source={{ uri: recipe.photoURL }}
                     style={styles.cardImage}
@@ -33,13 +31,16 @@ export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCa
                     source={require('../assets/images/plate.png')}
                     style={styles.cardImage}
                 />
-            ) }
+            )}
             <View style={styles.cardContent}>
                 <Text style={styles.cardTitle} numberOfLines={1}>{recipe.name}</Text>
-                <View style={styles.dateLabel}>
-                    {/* TODO: last ate date */}
-                    <Text style={styles.dateLabelText}>Sep 4, 2025</Text> 
-                </View>
+                {recipe.lastAte && (
+                    <View style={styles.dateLabel}>
+                        <Text style={styles.dateLabelText}>
+                            Last ate: {format(new Date(recipe.lastAte), 'MMM d, yyyy')}
+                        </Text>
+                    </View>
+                )}
                 <Text style={styles.cardDescription} numberOfLines={3}>{recipe.description}</Text>
             </View>
             <TouchableOpacity style={styles.addButton} onPress={() => onAddToMealPlan(recipe)}>

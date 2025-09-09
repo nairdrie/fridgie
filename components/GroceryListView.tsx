@@ -1,7 +1,7 @@
 // components/GroceryListView.tsx
 
-// TODO: if I have 200g sugar in list, 2 tsp sugar in a meal, the quantity is updated to "200 g + 2 tsp". Convert tsp to the unit in main list.
 import { Item } from '@/types/types';
+import { aggregateQuantities } from '@/utils/grocery';
 import { primary } from '@/utils/styles';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
@@ -83,19 +83,8 @@ export default function GroceryListView({
        // If an override exists, use it directly and skip aggregation.
        totalQuantity = overrideSource.overrideQuantity;
      } else {
-       // Original aggregation logic.
-       const quantities = sources.map(s => parseNumericQuantity(s.quantity)).filter(Boolean) as { value: number; unit: string }[];
-       if (quantities.length > 0) {
-         const unitTotals = quantities.reduce((acc, q) => {
-           const unitKey = q.unit.toLowerCase() || 'misc';
-           acc[unitKey] = (acc[unitKey] || 0) + q.value;
-           return acc;
-         }, {} as Record<string, number>);
-
-         totalQuantity = Object.entries(unitTotals)
-           .map(([unit, value]) => `${parseFloat(value.toFixed(2))}${unit === 'misc' ? '' : ` ${unit}`}`)
-           .join(' + ');
-       }
+       // Use the new aggregation logic
+       totalQuantity = aggregateQuantities(sources.map(s => s.quantity));
      }
 
      result.push({
