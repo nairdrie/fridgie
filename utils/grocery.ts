@@ -1,4 +1,5 @@
-import convert from 'convert';
+// Import the convert function AND the Unit type from the library
+import convert, { Unit } from 'convert';
 
 // A map to handle common abbreviations and variations
 const unitSynonyms: { [key: string]: string } = {
@@ -9,9 +10,8 @@ const unitSynonyms: { [key: string]: string } = {
   'ml': 'ml', 'milliliter': 'ml', 'milliliters': 'ml',
   'l': 'l', 'liter': 'l', 'liters': 'l',
   'tsp': 'tsp', 'teaspoon': 'tsp', 'teaspoons': 'tsp',
-  'tbsp': 'Tbs', 'tablespoon': 'Tbs', 'tablespoons': 'Tbs', // 'convert' library uses 'Tbs'
+  'Tbs': 'Tbs', 'tbsp': 'Tbs', 'tablespoon': 'Tbs', 'tablespoons': 'Tbs',
   'cup': 'cup', 'cups': 'cup',
-  // Add more as needed
 };
 
 function parseQuantity(quantityStr?: string): { value: number; unit: string } | null {
@@ -32,18 +32,23 @@ export function aggregateQuantities(quantities: (string | undefined)[]): string 
     if (parsedQuantities.length === 0) return '';
 
     try {
-        // Attempt to convert all quantities to the unit of the first quantity
-        const baseUnit = parsedQuantities[0].unit;
+        // Assert the type of the unit string to 'Unit'
+        const baseUnit = parsedQuantities[0].unit as Unit;
+
         const total = parsedQuantities.reduce((acc, q) => {
-            return acc + convert(q.value, q.unit).to(baseUnit);
+            // Assert the unit here as well before passing it to the library
+            const fromUnit = q.unit as Unit;
+            return acc + convert(q.value, fromUnit).to(baseUnit);
         }, 0);
 
-        // Use 'best' to format the final result nicely
+        // This part remains the same
         const best = convert(total, baseUnit).to('best');
-        return `${parseFloat(best.quantity.toFixed(2))} ${best.unit}`;
+        // Make sure to handle potential floating point inaccuracies gracefully
+        const finalQuantity = parseFloat(best.quantity.toFixed(2));
+        return `${finalQuantity} ${best.unit}`;
 
     } catch (e) {
-        // If conversion fails (e.g., mixing mass and volume), fall back to the original logic
+        // Fallback logic remains the same
         const unitTotals = parsedQuantities.reduce((acc, q) => {
             const unitKey = q.unit.toLowerCase() || 'misc';
             acc[unitKey] = (acc[unitKey] || 0) + q.value;
